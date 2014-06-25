@@ -17,11 +17,12 @@ keepdata=""
 installedonsystem=""
 specificdevice=""
 Debug_Flag=1
-Install_Directory="/system/b2g"
+Install_Directory="system/b2g"
 
 FASTBOOT=${FASTBOOT:-fastboot}
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+#SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="."
 
 function helper(){
     echo -e "
@@ -61,6 +62,8 @@ function restoredevice(){
     fi
     run_adb shell stop b2g 2> "$SCRIPT_DIR/mozilla-profile/recover.log"
     run_adb shell rm -r /data/b2g/mozilla 2> "$SCRIPT_DIR/mozilla-profile/recover.log"
+    run_adb shell mkdir data/b2g/mozilla
+    run_adb shell mkdir data/local
     run_adb push "$SCRIPT_DIR/mozilla-profile/profile" /data/b2g/mozilla 2> "$SCRIPT_DIR/mozilla-profile/recover.log"
     run_adb push "$SCRIPT_DIR/mozilla-profile/data-local" /data/local 2> "$SCRIPT_DIR/mozilla-profile/recover.log"
     run_adb reboot
@@ -96,52 +99,53 @@ function root_remount()
 function flash_gecko() {
     root_remount
     echo + Check how much space is taken
-    run_adb shell df /system
+    run_adb shell df system
     echo + removing old system
-    run_adb shell rm -r /system/b2g
+    run_adb shell rm -r system/b2g
     echo + Check how much is removed afterwards
-    adb shell df /system
-    run_adb push "$SCRIPT_DIR/b2g" /system/b2g
+    adb shell df system
+    adb shell mkdir -p system/b2g/dictionaries
+    run_adb push "$SCRIPT_DIR/b2g" system/b2g
     echo + Check how much is placed on after system install
-    adb shell df /system
+    adb shell df system
 }
 
 function flash_comril() {
     root_remount
     echo + Installing new RIL
-    run_adb push "$SCRIPT_DIR/ril" /system/b2g/distribution/bundles/
+    run_adb push "$SCRIPT_DIR/ril" system/b2g/distribution/bundles/
     echo + Done installing RIL!
 }
 
 function adb_clean_gaia() {
     root_remount
     
-    adb shell df /data
+    adb shell df data
     echo "Clean Gaia and profiles ..."
     echo + Deleting any old cache
-    run_adb shell rm -r /data/local/OfflineCache
-    run_adb shell rm -r /cache/*
+    run_adb shell rm -r data/local/OfflineCache
+    run_adb shell rm -r cache/*
 
     echo + Deleting Profile data
-    run_adb shell rm -r /data/b2g/*
-    run_adb shell rm -r /data/local/user.js
-    run_adb shell rm -r /data/local/indexedDB
-    run_adb shell rm -r /data/local/debug_info_trigger
-    run_adb shell rm -r /data/local/permissions.sqlite*
+    run_adb shell rm -r data/b2g/*
+    run_adb shell rm -r data/local/user.js
+    run_adb shell rm -r data/local/indexedDB
+    run_adb shell rm -r data/local/debug_info_trigger
+    run_adb shell rm -r data/local/permissions.sqlite*
 
-    adb shell df /data
+    adb shell df data
     run_adb reboot
     run_adb wait-for-device
     root_remount
     
     run_adb shell stop b2g
-    run_adb shell rm -r /data/local/storage/persistent/*
+    run_adb shell rm -r data/local/storage/persistent/*
     echo + Deleting any old gaia
-    run_adb shell rm -r /system/b2g/webapps
-    run_adb shell rm -r /data/local/webapps
-    run_adb shell rm -r /data/local/svoperapps
+    run_adb shell rm -r system/b2g/webapps
+    run_adb shell rm -r data/local/webapps
+    run_adb shell rm -r data/local/svoperapps
     echo "Clean Done."
-    adb shell df /data
+    adb shell df data
 }
 
 function adb_push_gaia() {
@@ -151,25 +155,29 @@ function adb_push_gaia() {
     cat "$SCRIPT_DIR/gaia/profile/user.js" | sed -e "s/user_pref/pref/" > "$SCRIPT_DIR/user.js"
     
     echo "Push Gaia ..."
-    run_adb shell mkdir -p /system/b2g/defaults/pref
+    run_adb shell mkdir -p system/b2g/defaults/pref
+    pushd $SCRIPT_DIR/gaia/profile &&
+    find webapps/ -type d -exec adb shell mkdir ${GAIA_DIR}/{} \; &&
+    popd
     run_adb push "$SCRIPT_DIR/gaia/profile/webapps" ${GAIA_DIR}/webapps
-    run_adb push "$SCRIPT_DIR/user.js" /system/b2g/defaults/pref
-    run_adb push "$SCRIPT_DIR/gaia/profile/settings.json" /system/b2g/defaults
+    run_adb push "$SCRIPT_DIR/user.js" system/b2g/defaults/pref
+    run_adb push "$SCRIPT_DIR/gaia/profile/settings.json" system/b2g/defaults
 
     if [ ! ${forcetosystem} ] ; then
     	run_adb remount
-    	run_adb shell mkdir /system/b2g/webapps
-        run_adb push "$SCRIPT_DIR/gaia/profile/webapps/webapps.json" /system/b2g/webapps/webapps.json
+    	run_adb shell mkdir system/b2g/webapps
+        run_adb push "$SCRIPT_DIR/gaia/profile/webapps/webapps.json" system/b2g/webapps/webapps.json
     fi
 
     echo "Push Done."
-    adb shell df /data
+    adb shell df data
 }
 
 function resetphone()
 {
-run_adb shell mkdir /cache/recovery &&
-run_adb shell 'echo "--wipe_data" > /cache/recovery/command' &&
+run_adb shell mkdir cache/recovery &&
+run_adb shell 'echo "--wipe_data" > cache/recovery/command' &&
+#run_adb push $SCRIPT_DIR/command cache/recovery/command
 run_adb reboot recovery
 }
 
@@ -240,17 +248,18 @@ function flash_fastboot()
 
 update_time()
 {
-    if [ `uname` = Darwin ]; then
-        OFFSET=`date +%z`
-        OFFSET=${OFFSET:0:3}
-        TIMEZONE=`date +%Z$OFFSET|tr +- -+`
-    else
-        TIMEZONE=`date +%Z%:::z|tr +- -+`
-    fi
+    #if [ `uname` = Darwin ]; then
+    #    OFFSET=`date +%z`
+    #    OFFSET=${OFFSET:0:3}
+    #    TIMEZONE=`date +%Z$OFFSET|tr +- -+`
+    #else
+    #    TIMEZONE=`date +%Z%:::z|tr +- -+`
+    #fi
     echo Attempting to set the time on the device
     run_adb wait-for-device
-    run_adb shell toolbox date `date +%s`
-    run_adb shell setprop persist.sys.timezone ${TIMEZONE}
+    TIME=date +%s
+    run_adb shell toolbox date $TIME
+    run_adb shell setprop persist.sys.timezone Europe/London #$TIMEZONE
 }
 
 ## Main
